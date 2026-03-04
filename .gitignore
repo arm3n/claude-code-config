@@ -1,0 +1,54 @@
+# Ignore everything by default
+*
+
+# Track configuration files
+!.gitignore
+!README.md
+!CLAUDE.md
+!settings.json
+!claude.json.backup
+
+# Track hooks
+!hooks/
+!hooks/*.js
+
+# Track skills
+!skills/
+!skills/*/
+!skills/**/SKILL.md
+
+# Track agents
+!agents/
+!agents/*.md
+
+# Track statusline
+!statusline-command.js
+
+# Track plans
+!plans/
+!plans/*.md
+
+# Track memory (project-level)
+!projects/
+!projects/*/
+!projects/*/memory/
+!projects/*/memory/*.md
+!projects/*/memory/gemini-sessions/
+!projects/*/memory/gemini-sessions/*.md
+
+# Never track these (sensitive personal data)
+.credentials.json
+projects/*/memory/credentials.md
+projects/*/memory/ccw-application.md
+projects/*/memory/health-tracking.md
+projects/*/memory/synology-nas.md
+projects/*/memory/media-stack.md
+debug/
+file-history/
+cache/
+backups/
+plugins/
+todos/
+context-pct-cache.json
+plan-usage-cache.json
+*.jsonl
