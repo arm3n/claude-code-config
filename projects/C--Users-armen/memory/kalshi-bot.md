@@ -193,41 +193,51 @@ Total invested: $6,455.78 | Fees: $99.13
 | settlement-cleanup | DONE | Settlement detection + position cleanup | `a30346a` — polls every 5 min, removes settled positions. |
 | shutdown-hang | DONE | Fix asyncio shutdown hang | `60bf342` — cancel tasks + TimeoutStopSec=15. |
 
-### Gemini Audit P0s (2026-03-07) — fix immediately
+### Gemini Audit P0s (2026-03-07) — ALL DONE (`5530f90`)
 | ID | Status | Title | Notes |
 |----|--------|-------|-------|
-| ga-zombie-orders | **OPEN** | Cancel existing resting orders on startup | Bot layers new quotes on top of stale ones after restart. |
-| ga-cancel-guard | **OPEN** | Skip quoting if cancel fails | Cancel exception → proceeds to place new orders → double exposure. |
-| ga-zombie-tasks | **OPEN** | Detect crashed asyncio tasks | `return_exceptions=True` swallows task crashes silently. |
-| ga-utc-rollover | **OPEN** | Fix Day-1 logic dying at 8PM ET | `datetime.now(utc)` rolls forecast_day=2 at midnight UTC. Use ET. |
-| ga-prob-normalize | **OPEN** | Normalize 6-bracket probabilities to 1.0 | Raw CDFs don't sum to 100%, systematic arb leak. |
-| ga-fill-reconcile | **OPEN** | Reconcile PnL from REST fills | Missed WS fills → daily loss limit blind spot. |
+| ga-zombie-orders | **DONE** | Cancel existing resting orders on startup | `_cancel_stale_orders()` in `start()`. Confirmed: "Cancelled 21 stale resting orders on startup". |
+| ga-cancel-guard | **DONE** | Skip quoting if cancel fails | `_cancel_orders_for_ticker` returns bool, `continue` on failure. |
+| ga-zombie-tasks | **DONE** | Detect crashed asyncio tasks | `gather` results checked, non-CancelledError triggers `shutdown()`. Tasks named. |
+| ga-utc-rollover | **DONE** | Fix Day-1 logic dying at 8PM ET | `ZoneInfo("America/New_York")` for forecast_day calc. |
+| ga-prob-normalize | **DONE** | Normalize 6-bracket probabilities to 1.0 | Two-pass: compute raw FVs, divide by sum. Logs when delta > 0.1%. |
+| ga-fill-reconcile | **DONE** | Position reconciliation via REST | `_reconciliation_loop` every 2 min compares risk vs API positions. Resyncs mismatches + zeros orphans. |
 
 ### Gemini Audit P1s (2026-03-07)
 | ID | Status | Title | Notes |
 |----|--------|-------|-------|
-| ga-t-variance | **OPEN** | Verify Student's t variance scaling | t(df=5) variance=5/3, may be 29% wider than intended. |
-| ga-pending-leak | **OPEN** | Clear pending on order timeout | TimeoutError path never clears _pending, slowly freezes bot. |
-| ga-event-limits | **OPEN** | Add per-event position limits | Per-ticker cap=25 but can get 75 contracts directional on one city. |
-| ga-illiquid-unreal | **OPEN** | Fallback for illiquid unrealized PnL | No orderbook mid → unrealized=$0 even if position worthless. |
-| ga-ws-reconnect-die | **OPEN** | Harden WS reconnect exception handling | connect() in except handler can kill WS task. |
-| ga-market-discovery | **OPEN** | Periodic market discovery refresh | Only runs at startup — new events never found. |
+| ga-t-variance | **DONE** | Fix Student's t variance scaling (`313066d`) | Confirmed 29% too wide. Scale z by sqrt(df/(df-2)). Center brackets +2-7c, tails -4-5c. |
+| ga-pending-leak | **DONE** | Clear pending on order timeout (`5ecacde`) | Added `reduce_pending` in both bid/ask TimeoutError handlers. |
+| ga-event-limits | **DONE** | Per-event position limits (`4f7ab17`) | max_event_position=50 in config. Event = ticker.rsplit("-",1)[0]. Checked in check_order(). |
+| ga-illiquid-unreal | **DONE** | Fallback for illiquid unrealized PnL (`d5670e4`) | Falls back to model fair value (quoter FV×100) when no orderbook mid exists. Stored in `_fair_values` dict, used in mark-to-market block. |
+| ga-ws-reconnect-die | **DONE** | Harden WS reconnect with backoff (`909f980`) | Extracted `_reconnect()` with try/except + exp backoff (2s->30s). |
+| ga-market-discovery | **DONE** | Periodic market discovery refresh (`d5670e4`) | `_discovery_loop` every 4h (configurable via `discovery.interval`). Diffs old vs new tickers, subscribes new ones to WS. |
 
 ### P2 — Medium (model improvements, edge cases)
 | ID | Status | Title | Notes |
 |----|--------|-------|-------|
 | kalshi-climo | DONE | Dynamic climatology + 1.5σ/0.4 anomaly threshold | Deployed. |
-| april-climo-update | **OPEN** | Update 12 market configs for April climo values | Due before Apr 1 (26 days). All cities in config.yaml. |
-| adverse-selection | **OPEN** | Reduce adverse selection on center brackets | 15 fills at 55c+ caused $555 PnL drop in 8min. Bot getting picked off by informed traders on ATM brackets. Consider wider spread or skip near-ATM. |
-| spread-widen | **OPEN** | Widen spread on model disagreement | When HRRR vs NWS differ >3F, spread should auto-widen. |
-| ws-sequence | **OPEN** | WS orderbook sequence tracking | Gemini finding N2 — detect missed deltas. |
+| april-climo-update | **DONE** | Dynamic monthly climo lookup (`99fe8bd`) | Replaced static `climo_avg` with `climo_by_month` dict (all 12 months, 1991-2020 NOAA/NWS). Auto-resolves from event date. No more monthly config updates. |
+| adverse-selection | **DONE** | Reduce adverse selection on center brackets (`4ab6537`) | ATM spread widening: +3c extra at fv=50%, linear taper to zero at fv≤30%/≥70%. Config `atm_spread_extra`. |
+| spread-widen | **DONE** | Widen spread on model disagreement (`930c076`) | HRRR vs NWS gap ≥3°F triggers +3c extra half-spread. Config `model_disagree_threshold_f`, `model_disagree_spread_extra`. |
+| ws-sequence | **DONE** | WS orderbook sequence tracking (`f513a37`) | Tracks seq per ticker, detects gaps, re-subscribes to get fresh snapshot. Also fixed subscribe() to accumulate tickers. |
 | settlement-handling | DONE | Handle contract settlement events | `a30346a` — _settlement_loop() polls unsettled API. |
-| rate-limiting | **OPEN** | API rate limiting | Gemini N6 — no throttling on REST calls. |
+| rate-limiting | **DONE** | API rate limiting (`0ecce26`) | Sliding 1-sec window at 25 req/sec in `rest.py:_throttle()`. |
+| non-json-crash | **DONE** | Handle non-JSON API responses (`73ea1f4`) | try/except on `resp.json()` for HTML 502/503 error pages. |
+
+### Lean Refactor (replaces ADK plan — see rejection note below)
+| ID | Status | Title | Notes |
+|----|--------|-------|-------|
+| lean-module-refactor | **OPEN** | Extract main.py into clean Python modules | Split ~900-line WeatherMM into forecast/, pricing/, execution/, monitor/ modules. No LLM, no framework. Agent boundaries from ADK plan are good module boundaries. |
+| lean-gemini-verify | **OPEN** | Standalone Gemini pre-trade verification | Single `google-genai` call per cycle. Pass quotes+forecasts as JSON, get pass/fail. Graceful degradation: if Gemini down, fall back to deterministic checks (sum=100, no negative edge, risk limits). ~$5-8/mo. |
+| lean-pytest-evals | **OPEN** | Pytest eval framework with historical scenarios | Denver blowup, climo bugs, adverse selection. pytest + fixtures, no ADK eval needed. Regression testing against real Day 1 failures. |
+| kalshi-ensemble | **OPEN** | Blend NBM + ECMWF ensemble models | NBM = pre-built 30-model blend on Open-Meteo. Highest value add after current fixes. Needs Open-Meteo commercial license (EUR 15/mo). |
+
+**ADK Rejection (2026-03-07)**: Gemini 3-call split-brain unanimously rejected the `research/ADK-INTEGRATION-PLAN.md`. 5 critical risks: (1) Gemini API down = trading paralysis, (2) ADK version churn for production trading, (3) 2-5s latency per LLM hop in 30s cycle, (4) turn-based session vs continuous WS mismatch, (5) t3.micro OOM (ADK ~285MB deps vs <100MB current). Only the VerificationAgent had real value — implemented as standalone API call in `lean-gemini-verify` instead.
 
 ### P3 — Low (future improvements)
 | ID | Status | Title | Notes |
 |----|--------|-------|-------|
-| kalshi-ensemble | **OPEN** | Blend NBM + ECMWF ensemble models | NBM = pre-built 30-model blend on Open-Meteo. Highest value add after current fixes. |
 | kalshi-low-temp | **OPEN** | Investigate KXLOW inactive series | All 6 LOW series show 0 active events. Possibly seasonal. |
 | kim-replicate | **OPEN** | Replicate Kim et al. lead-lag pipeline | Blocked by verification of post-2025 performance. |
 | kim-verify | **OPEN** | Verify Kim et al. post-2025 performance | arXiv:2602.07048, zero txn cost modeling. |
@@ -246,7 +256,9 @@ Total invested: $6,455.78 | Fees: $99.13
 | audit-1-3 | 2026-03-05 | Strategy audit sessions 1-3 |
 
 ## Handovers
-- `~/.claude/handovers/HANDOVER-2026-03-07-gemini-audit-fixes.md` — **LATEST** (Gemini 3-call audit, 18 findings, daily reset, unrealized PnL, settlement, shutdown fix)
+- `~/.claude/handovers/HANDOVER-2026-03-07-gemini-audit-complete.md` — **LATEST** (All 18 Gemini audit issues resolved: 6 P0 + 6 P1 + 6 P2. 7 commits pushed to origin.)
+- `~/.claude/handovers/HANDOVER-2026-03-07-gemini-p0-p1-fixes.md` — Superseded
+- `~/.claude/handovers/HANDOVER-2026-03-07-gemini-audit-fixes.md` — Superseded
 - `~/.claude/handovers/HANDOVER-2026-03-06-p0-fixes-deploy.md` — Superseded
 - `~/.claude/handovers/HANDOVER-2026-03-06-deploy-risk-hardening.md` — Deploy + .env fix
 - `~/.claude/handovers/HANDOVER-2026-03-06-risk-hardening.md` — Risk hardening (pending tracking, shutdown, bootstrap, timeout, async rules)
