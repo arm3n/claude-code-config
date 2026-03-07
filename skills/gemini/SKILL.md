@@ -54,27 +54,44 @@ Core principle: **Gemini reads, Claude writes.** Use Gemini's 1M context for ing
 
 ### Gemini Verification Protocol (split-brain, three calls)
 
-When asked to "verify with Gemini," run THREE separate calls. Never combine convergent fact-checking with divergent critique — mixing them causes attention collapse where Gemini hyper-fixates on quotes and defaults to "looks good" on gaps.
+When asked to "verify with Gemini," run THREE separate calls. **Actuary runs FIRST** — before Blind and Auditor. Never combine convergent fact-checking with divergent critique — mixing them causes attention collapse where Gemini hyper-fixates on quotes and defaults to "looks good" on gaps.
 
-**Call 1 — Independent verification (blind)**: Convert original claims into neutral questions (strip Claude's framing). Give to Gemini via `gemini-search`. Let it independently research and return findings with citations. Compare against Claude's conclusions. Divergences become high-priority flags.
+**Call 1 — The Actuary FIRST (divergent critique)**: Runs BEFORE other calls to challenge the premise before details get validated. Separate `gemini-search` call that sees Claude's synthesis. Purely divergent. Uses the locked adversarial prompt below (research OR engineering variant — pick whichever fits):
 
-**Call 2 — The Auditor (SAFE protocol)**: Give Gemini Claude's synthesis. Purely convergent:
+*Research variant:*
+> "You are a hostile, lateral-thinking analyst. What secondary effects (economic, logistical, insurance, supply chain), minority actors (non-state groups, proxies, local factions), or alternative mechanisms are completely ignored by this analysis? What is the most obvious way this analysis is structurally blind?"
+
+*Engineering variant (for plans, implementations, architecture decisions):*
+> "You are a hostile engineering critic. You MUST answer all three: (1) Name the simplest alternative approach that achieves 80% of the benefit with 20% of the complexity. (2) Identify the #1 way this approach is over-engineered or adds unnecessary dependencies. (3) What happens when the most critical new dependency in this plan fails — does the system degrade gracefully or stop working? 'Looks good' is not a valid response."
+
+This call must NOT also fact-check — its only job is to find what's wrong or missing.
+
+**Call 2 — Independent verification (blind)**: Convert original claims into neutral questions (strip Claude's framing). Give to Gemini via `gemini-search`. Let it independently research and return findings with citations. Compare against Claude's conclusions. Divergences become high-priority flags.
+
+**Call 3 — The Auditor (SAFE protocol)**: Give Gemini Claude's synthesis. Purely convergent:
 - Decompose into atomic claims and verify each against sources
 - For every claim validated, provide a verbatim quote from a source — if no quote exists, mark UNVERIFIED
 - Output: structured PASS/FAIL/UNVERIFIED per claim. Nothing else.
 - **Tool selection**: If a Gemini context cache exists with the extracted source corpus, use `gemini-query-cache` to verify claims against *our actual sources* (not just the live web). If no cache exists, fall back to `gemini-search`.
 
-**Call 3 — The Actuary (divergent critique)**: Separate `gemini-search` call with Claude's synthesis. Purely divergent:
-- Prompt: *"You are a hostile, lateral-thinking analyst. What secondary effects (economic, logistical, insurance, supply chain), minority actors (non-state groups, proxies, local factions), or alternative mechanisms are completely ignored by this analysis? What is the most obvious way this analysis is structurally blind?"*
-- This call must NOT also fact-check — its only job is to find what's missing.
+**After all 3 calls — Verification Audit Table (mandatory):**
+Claude must output this table so the user can verify calls weren't relabeled:
+
+```
+| # | Role | Actual query sent (first 80 chars) | Key finding |
+|---|------|-------------------------------------|-------------|
+| 1 | Actuary | "You are a hostile engineering critic..." | [finding] |
+| 2 | Blind | "What are the best approaches to..." | [finding] |
+| 3 | Auditor | "Verify these claims: (1)..." | [finding] |
+```
 
 All three calls require `gemini-search` — never `gemini-analyze-text`.
 
 | Call | Mode | Correct Tool | Wrong Tool |
 |------|------|-------------|------------|
-| 1: Blind independent research | Divergent | `gemini-search` | ~~gemini-analyze-text~~ |
-| 2: Auditor (atomic SAFE) | Convergent | `gemini-query-cache` (if cache exists) or `gemini-search` (fallback) | ~~gemini-analyze-text~~ |
-| 3: Actuary (lateral critique) | Divergent | `gemini-search` | ~~gemini-analyze-text~~ |
+| 1: Actuary (lateral critique) | Divergent | `gemini-search` | ~~gemini-analyze-text~~ |
+| 2: Blind independent research | Divergent | `gemini-search` | ~~gemini-analyze-text~~ |
+| 3: Auditor (atomic SAFE) | Convergent | `gemini-query-cache` (if cache exists) or `gemini-search` (fallback) | ~~gemini-analyze-text~~ |
 | Writing/structure quality only | N/A | `gemini-analyze-text` | — |
 
 **`gemini-analyze-text` has NO web access.** Only use for pure writing/structural critique where facts aren't in play.
@@ -82,6 +99,8 @@ All three calls require `gemini-search` — never `gemini-analyze-text`.
 **Anti-pattern — circular verification:** Feeding Gemini conclusions via `gemini-analyze-text` and asking "is this right?" produces Gemini grading the analysis against itself. Both the Kurdish and Lloyd's/insurance gaps in the Iran analysis (2026-03-03) survived this pattern.
 
 **Anti-pattern — cognitive overload:** Asking Gemini to do rigid atomic fact-checking AND open-ended "what's missing?" in one call. The structural task dominates attention and the divergent critique gets a generic pass. Always split.
+
+**Anti-pattern — Auditor relabeling (ADK incident 2026-03-07):** Running 3 convergent feasibility checks and labeling them Blind+Auditor+Actuary. The Actuary-first ordering + mandatory audit table prevents this. If the audit table shows 3 queries that all ask "can X do Y?" — none of them was an Actuary.
 
 ### Available Gemini MCP Tools
 

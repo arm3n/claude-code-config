@@ -79,6 +79,31 @@ Gemini re-audited the fully updated SOP. Found 4 edge cases, 2 misreads. 4 imple
 
 ### Gemini's final verdict: "one of the most robust multi-agent research SOPs I have ever seen"
 
+## Actuary Enforcement Overhaul (2026-03-07)
+
+Post-mortem from ADK integration plan. Claude ran 3 Auditor calls labeled as B+Au+Ac, rubber-stamping an over-engineered ADK plan for the Kalshi bot. The other Kalshi session's Gemini caught it — recommended a lean 4-phase approach instead of 7-phase ADK framework. Gemini's Actuary critique of the proposed fixes also sharpened the final design.
+
+### 14. Actuary-FIRST ordering
+**Problem**: B→Au→Ac order means by the time Actuary runs, 2 confirming results create inertia to skip. Claude skipped it entirely and ran 3 Auditors.
+**Fix**: Reversed to Ac→B→Au. Actuary runs FIRST to challenge the premise before details get validated.
+
+### 15. Engineering variant for Actuary prompt
+**Problem**: Actuary prompt template was research-specific ("actors, mechanisms"). Didn't naturally trigger on engineering over-engineering decisions.
+**Fix**: Added locked engineering variant: "Name simplest alternative at 80% benefit. Identify #1 over-engineering risk. What happens when critical dependency fails?"
+
+### 16. Mandatory verification audit table
+**Problem**: No visibility into whether calls were relabeled. Claude can label 3 Auditors as B+Au+Ac.
+**Fix**: After all 3 calls, Claude must output a structured table showing call role, actual query (first 80 chars), and key finding. User can see at a glance if calls were relabeled.
+
+### Rejected fixes (Gemini Actuary killed them):
+- **De-anchoring Actuary** (hide solution, show only problem) — Makes critique irrelevant/generic. Actuary needs to see the solution to attack its specific weaknesses.
+- **Mandatory flaw quota** — Goodhart's Law. Forces pedantic filler that buries real findings in alert fatigue.
+- **Unanimous agreement = red flag** — Creates incentive for synthetic dissent to bypass penalty.
+
+### Files Modified
+- `~/.claude/CLAUDE.md` — Actuary-first ordering in step 8, audit table requirement, lesson annotation
+- `~/.claude/skills/gemini/SKILL.md` — Full rewrite of verification protocol: Ac→B→Au ordering, engineering variant prompt, audit table template, new anti-pattern (Auditor relabeling)
+
 ## Git Commits
 - `b85ddec` — Overhaul: domain matrix, orphan check, split-brain Gemini, extract-before-reason
 - `4b47453` — Fix 4 edge cases from Gemini's second SOP audit
