@@ -1,34 +1,44 @@
-# Polymarket Multi-Strategy Trading Operation
+# Kalshi Trading Bot (formerly Polymarket Multi-Strategy)
 
 ## Project
 - Location: `~/polymarket-mm-bot/`
 - Beads: prefix `polymarket-mm`, SQLite, stealth mode
-- Plan: `~/.claude/plans/precious-swinging-lampson.md` (STALE — needs rewrite for multi-strategy)
+- Plan: `~/.claude/plans/polymorphic-stirring-flamingo.md` (NEEDS MAJOR REWRITE for Kalshi-only hybrid strategy)
 - Master research: `~/polymarket-mm-bot/research/beyond-mm-comprehensive-research-2026-03-02.md` (358+ sources)
+- LLM ensemble research: `~/reports/llm-ensemble-forecasting-edge-2026-03-04.md` (200+ sources)
 - Gemini review: `~/polymarket-mm-bot/research/gemini-critical-review-beyond-mm-2026-03-02.md`
-- Handover: `~/.claude/handovers/HANDOVER-2026-03-03-gemini-r5-fixes.md`
+- Strategy handover: `~/.claude/handovers/HANDOVER-2026-03-05-kalshi-strategy-research.md`
 - GitHub: `arm3n/polymarket-mm-bot` (private), master branch, 5 commits
+- **PLATFORM: Kalshi ONLY** (user is US-based, dropped Polymarket 2026-03-05)
 
 ## Origin
 - Viral tweet @xmayeth Mar 2 2026 (567K views) — "leaked" paper from top-20 quant team
 - Paper is AI-generated marketing fluff. But underlying strategy (hedged LP) is real.
 - Expanded from pure MM to multi-strategy after 358+ source deep research + Gemini review
 
-## Revised Strategy (Multi-Strategy, Staged Scaling)
-- **Stage 1** ($25-50K, 2-3mo): Harden systems, paper trade, prove P&L for 60+ days
-- **Stage 2** ($100-250K, 3-6mo): Validated scaling, activate cross-platform arb + directional
-- **Stage 3** ($500K-2M, 6-12mo): Full multi-strategy operation
-- Allocation at scale: 40% hedged MM + 25% cross-platform arb + 20% domain directional + 15% cash
+## Revised Strategy (Hybrid, Kalshi-Only, Staged Scaling)
+- **Stage 1** ($5-10K, validate): MM on 5-10 liquid markets + LLM screening. Prove signal.
+- **Stage 2** ($25-50K, scale): 15-25 markets, MM + directional + high-prob bonds. $2-6K/mo target.
+- **Stage 3** ($50-100K+, optimize): Full hybrid, 20-40 markets. $4-15K/mo target.
+- Three revenue layers: spread capture + LLM-screened directional bets + high-probability bonds
+- **FRAME SHIFT (2026-03-05)**: Pure MM insufficient for small operator. Top earners are directional specialists (96% win rate, Gemini-verified). LLM highest value as market screener, not continuous quoter (MIT/Kalshi paper arXiv:2602.07048).
 
-## 8 Strategy Categories (Ranked)
-1. Cross-platform arb (Polymarket↔Kalshi) — $40M extracted/yr, validated by IMDEA academic study
-2. High-prob bonds (>95% outcomes) — 15-40% APY, asymmetric tail risk
-3. Domain specialization — "only place retail has structural alpha" (Gemini)
-4. AI/ML ensemble prediction — ManticAI 4th on Metaculus, LLM parity ~Jun 2026
-5. Speed/latency trading (crypto 5/15-min) — 0x8dxd: $313→$438K
-6. Hedged market making — 15-30% APY realistic, rewards declining
-7. Information arbitrage — Theo $85M, not replicable at retail
-8. Copy trading — unverified, NOT recommended
+## LLM Estimator Research (Gemini-verified 2026-03-04 + 2026-03-05)
+- **Models**: gpt-5-mini (Brier 0.155, $0.25/$2.00) + Gemini 2.5 Flash (Brier 0.179, $0.30/$2.50)
+- **AVOID**: GPT-4o-mini (Brier 0.239, worse than random on politics 0.296); extended reasoning modes (worsen calibration per KalshiBench)
+- **Refresh**: 10-15 min political, 5 min sports, event-triggered overlay. WebSocket fast loop for A-S.
+- **Cost**: ~$10-80/mo total with prompt caching (90% reduction). LLM cost is irrelevant to profitability.
+- **No flat-rate API subs exist** for Gemini or OpenAI (Claude Max is unique). All pay-per-token.
+- **Cerebras free tier**: 1M tokens/day — potential free 3rd ensemble member (Llama 4 Scout)
+- **Key papers**: FutureSearch (arXiv:2601.22444), KalshiBench (arXiv:2512.16030), LinqAlpha/MIT (arXiv:2602.07048)
+
+## Strategy Categories (Kalshi-only, ranked for small operator)
+1. Domain specialization + LLM screening — "only place retail has structural alpha" (Gemini)
+2. Hedged market making (10-25 markets) — spread capture + structural "optimism tax"
+3. High-prob bonds (>95% outcomes) — 15-40% APY, capital parking between opportunities
+4. AI/ML ensemble prediction — gpt-5-mini + Gemini Flash, 10-15 min refresh
+5. ~~Cross-platform arb~~ — N/A (Kalshi-only)
+6. ~~Speed/latency trading~~ — N/A (no 5/15-min crypto on Kalshi)
 
 ## Gemini Critical Review (2nd Round)
 - Cross-platform arb is "mathematically illiterate" for micro-capital but viable at $200K+
@@ -49,7 +59,7 @@
 - Reference: poly-maker, Polymarket/agents, pmxt, terauss Rust arb bot
 - On-chain: Polygon, ERC-1155, CTF mergePositions (CRITICAL)
 - Backtesting: NautilusTrader or Hummingbot (A-S implementation)
-- LLM ensemble: multi-model (GPT-4.5/o3 + Claude + Foresight-32B)
+- LLM ensemble: gpt-5-mini (Brier 0.155) + Gemini 2.5 Flash (Brier 0.179) + Haiku 4.5 (later)
 
 ## CRITICAL Risks
 1. **Adverse selection** — insiders pick off resting orders. 8 documented cases in 12mo.
@@ -59,13 +69,13 @@
 5. **Platform security** — Dec 2025 auth breach drained accounts
 6. **Edge decay** — taker fees (Jan 2026), institutional MMs entering
 
-## Implementation Status (as of 2026-03-03 session 7)
-- **Core architecture COMPLETE + hardened**: 20 source files, 10 test files, **135 tests passing**
+## Implementation Status (as of 2026-03-03 session 8)
+- **Core architecture COMPLETE + hardened**: 22 source files, 11 test files, **135 tests passing**
 - **py_clob_client NOW INSTALLED** (v0.34.6, pre-built wheel — no Rust needed)
 - **pytest-asyncio NOW INSTALLED** (v1.3.0) — 7 previously-skipped async test files now run
-- **Gemini R5+R6+R7+R8**: ALL findings resolved
-- Session 7: py_clob_client install, R8 review + 6 fixes, committed 6213d11
-- 23 commits on master (6213d11), pushed to `arm3n/polymarket-mm-bot` (private)
+- **Gemini R5+R6+R7+R8+R9**: ALL findings resolved
+- Session 8: R9 review + 6 fixes, committed 96533ae
+- 24 commits on master (96533ae), pushed to `arm3n/polymarket-mm-bot` (private)
 
 ## Gemini Codebase Reviews
 - **Review #3** (2026-03-02): 10 findings, 3 P1 critical — ALL FIXED
@@ -82,8 +92,31 @@
   - P2-2: stop() halts orders before cancel_all
   - FALSE POSITIVE: P1-2 dict iteration — break after await prevents RuntimeError
   - Used Gemini context cache (full codebase, 310KB, all src+tests) for comprehensive review
+- **Review #9** (2026-03-03): 7 findings (1 P0, 4 P1, 1 P2, 1 P3) — **6 FIXED, 0 false positives** (session 8)
+  - P0: Partial fill orders now included in open_yes/no_orders, locked capital, reconciliation, emergency cancel
+  - P1: Unresolved WS fill tokens return early (prevents phantom NO position corruption)
+  - P1: Pending merge timeout check added to exception handler (web3 version safety)
+  - P1: Kalshi SPX strike extraction tries title first (T5800/100=58.0 was wrong)
+  - P2: NegRisk market registration wired up in _rescan_markets
+  - P2: Stale order cancellation moved before ladder building (locked capital double-counting)
+  - P3: Unused DataRecorder methods — skipped, not a bug
+  - Also fixed: missing `import asyncio` in market_selector.py (Gemini missed this!)
+  - Cache: `polymarket-mm-bot-r9-review`, full codebase 312KB
 - **Review protocol**: Cache ENTIRE codebase in Gemini 1M context, not sampling. System instruction demands every file, every function.
 - py-clob-client is synchronous — thread pool chokes beyond ~10-20 markets
+
+## IMPORTANT: R9 API changes
+- `MarketQuotes.open_yes_orders`/`open_no_orders` now include `"partial"` status (not just `"open"`)
+- `_push_locked_capital` counts `"partial"` orders' remaining size
+- `_cancel_market_orders_unlocked` cancels `"partial"` orders too
+- Reconciliation (`_reconciliation_loop`) checks `"partial"` orders for staleness
+- `reconcile_gone_order` handles `"partial"` status orders
+- `_on_fill` returns early if token_id cannot be resolved to market/side
+- `_check_pending_tx` exception handler now has 600s timeout (same as None-receipt path)
+- `NormalizedMarket` has new field `neg_risk: bool = False`
+- Scanner: Kalshi strike extraction tries title BEFORE ticker (fixes SPX T-format division by 100)
+- `_refresh_quotes_unlocked`: cancels stale orders BEFORE building ladder (not after)
+- `market_selector.py` now imports `asyncio` (was missing but used for Semaphore/gather)
 
 ## IMPORTANT: R8 API changes
 - `HedgedPosition.consume_merge()` now returns `tuple[Decimal, Decimal]` — `(usdc_recovered, realized_pnl)`, NOT just `Decimal`

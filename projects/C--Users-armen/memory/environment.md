@@ -14,7 +14,7 @@
   - Safe to upgrade `pydantic` itself (pulls correct core); only block standalone `pydantic-core` upgrades
 
 ## SSH
-- Synology NAS: `Host synology` in `~/.ssh/config` (local IP, key ~/.ssh/synology)
+- Synology NAS: `Host synology` in `~/.ssh/config` (192.168.0.21, user armen, key ~/.ssh/synology)
 - `LogLevel ERROR` set to suppress OpenSSH post-quantum key exchange warnings (Synology's sshd is too old for PQ KEX)
 
 ## PATH Configuration (`~/.bash_profile`)
@@ -42,7 +42,7 @@ export PATH="$HOME/.bun/bin:$PATH"
     - Auth: email login via `pwm login` — token at `~/.config/perplexity-web-mcp/token`
     - MCP tools (perplexity_ask/search/research/reason) blocked by Cloudflare subprocess detection
     - **CLI workaround works**: `pwm ask "query" --json` via Bash tool — bypasses Cloudflare
-    - **Pro subscription ($20/mo)** active since 2026-02-27
+    - **Pro subscription ($20/mo)** active since 2026-02-27, account: armen@armen.am
     - Pro quotas: 300 Pro searches/day, 20 Deep Research/day, 25 Create Files, 2 Browser Agent
     - Free tier was only 5 Pro/day — too limiting for research workflows
   - Context7 (live library documentation, free, by Upstash) — added 2026-02-05
@@ -63,6 +63,8 @@ export PATH="$HOME/.bun/bin:$PATH"
     - Override models: `GEMINI_PRO_MODEL`, `GEMINI_FLASH_MODEL`, `GEMINI_IMAGE_MODEL` env vars
     - Paid Tier 1 API key
     - Note: Gemini 3 Pro may have regressed on long-context vs 2.5 Pro; set `GEMINI_PRO_MODEL=gemini-2.5-pro` if quality issues appear
+    - **gemini-search query length**: Keep to 1-2 focused topics per call. Long multi-claim queries (8+ claims) return empty. Break into separate sequential calls.
+    - **gemini-search must be called SEQUENTIALLY** — parallel calls return empty or fail with "fetch failed"
   - **Jina Reader** (official jina-ai/MCP, remote HTTP) — added 2026-02-24, replaces Firecrawl
     - URL: `https://mcp.jina.ai/v1?include_tools=read_url`
     - Transport: HTTP (no npx, no local process)

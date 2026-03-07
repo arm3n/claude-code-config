@@ -23,7 +23,7 @@
 ### Perplexity
 - **`pwm.EXE usage`** (`perplexity-web-mcp-cli` v0.7.1) — scrapes `perplexity.ai/rest/rate-limit/all` and `/rest/user/settings`
 - Session token at `~/.config/perplexity-web-mcp/token` (NextAuth cookie)
-- Auth: Pro subscription ($20/mo)
+- Auth: armen@armen.am, Pro ($20/mo)
 - **Pro Search limit is 200 (not 300)** — confirmed 2026-03-01 by direct API test
 - Pro Search resets weekly; Deep Research resets monthly
 - `query_count` / `query_count_copilot` from `/rest/user/settings` track cumulative queries on account
