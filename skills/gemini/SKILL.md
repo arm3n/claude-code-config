@@ -74,18 +74,10 @@ This call must NOT also fact-check — its only job is to find what's wrong or m
 - Output: structured PASS/FAIL/UNVERIFIED per claim. Nothing else.
 - **Tool selection**: If a Gemini context cache exists with the extracted source corpus, use `gemini-query-cache` to verify claims against *our actual sources* (not just the live web). If no cache exists, fall back to `gemini-search`.
 
-**After all 3 calls — Verification Audit Table (mandatory):**
-Claude must output this table so the user can verify calls weren't relabeled:
+**After Gemini calls — proceed to ChatGPT sequential track (see below).**
+If running Gemini-only (no ChatGPT), output a 3-row audit table. If running full 6-call verification, output the expanded 6-row table defined in the ChatGPT section below.
 
-```
-| # | Role | Actual query sent (first 80 chars) | Key finding |
-|---|------|-------------------------------------|-------------|
-| 1 | Actuary | "You are a hostile engineering critic..." | [finding] |
-| 2 | Blind | "What are the best approaches to..." | [finding] |
-| 3 | Auditor | "Verify these claims: (1)..." | [finding] |
-```
-
-All three calls require `gemini-search` — never `gemini-analyze-text`.
+All three Gemini calls use `gemini-search` — it runs on **Gemini 3.1 Pro** (via `GEMINI_PRO_MODEL` env var) with Google Search grounding. Verified via API `modelVersion` field 2026-03-08.
 
 | Call | Mode | Correct Tool | Wrong Tool |
 |------|------|-------------|------------|
@@ -102,6 +94,72 @@ All three calls require `gemini-search` — never `gemini-analyze-text`.
 
 **Anti-pattern — Auditor relabeling (ADK incident 2026-03-07):** Running 3 convergent feasibility checks and labeling them Blind+Auditor+Actuary. The Actuary-first ordering + mandatory audit table prevents this. If the audit table shows 3 queries that all ask "can X do Y?" — none of them was an Actuary.
 
+### ChatGPT Sequential Verification Track (split-brain, three calls)
+
+Run the ChatGPT track after launching the 3 Gemini calls. ChatGPT uses **GPT-5.4 Thinking** — a fundamentally different architecture from Gemini, maximizing provider diversity. The 3 ChatGPT calls run SEQUENTIALLY (one browser tab, one at a time).
+
+**Setup:** Requires Chrome launched with `--remote-debugging-port=9222 --user-data-dir=<temp-dir>`, logged into ChatGPT, with agent-browser connected via `--session chatgpt --cdp 9222`. Full procedure in `~/.claude/scripts/chatgpt-setup.md`. Function code in `~/.claude/scripts/chatgpt-send.js`.
+
+**Injection (once per session):**
+```bash
+agent-browser --session chatgpt eval --stdin < ~/.claude/scripts/chatgpt-send.js
+```
+
+**Call 4 — ChatGPT Actuary (divergent critique):** Same adversarial prompt as Gemini Actuary (research or engineering variant). GPT-5.4 Thinking running the *same adversarial frame* as Gemini — divergences between the two Actuaries are the highest-signal findings.
+
+**Call 5 — ChatGPT Blind (independent research):** Same neutral questions as Gemini Blind (strip Claude's framing). GPT-5.4 Thinking researches independently, providing a different perspective.
+
+**Call 6 — ChatGPT Auditor (SAFE protocol):** Same atomic claims as Gemini Auditor. Verify each claim with evidence or mark UNVERIFIED. Different model + different reasoning = independent fact-check.
+
+**Execution pattern (each call):**
+```bash
+agent-browser --session chatgpt eval --stdin <<'EVALEOF'
+(async () => {
+  const result = await window.chatgpt_send("YOUR PROMPT HERE", 120000);
+  return result;
+})()
+EVALEOF
+```
+
+| Call | Role | Model | Method | Mode |
+|------|------|-------|--------|------|
+| 4: ChatGPT Actuary | Adversarial critique | GPT-5.4 Thinking | `chatgpt_send()` | Divergent |
+| 5: ChatGPT Blind | Independent research | GPT-5.4 Thinking | `chatgpt_send()` | Divergent |
+| 6: ChatGPT Auditor | Atomic SAFE | GPT-5.4 Thinking | `chatgpt_send()` | Convergent |
+
+**Why ChatGPT replaced Groq (2026-03-08):** Groq scored 2.8/10 in live testing — 0/3 first-attempt success (413, 429 errors), fabricated 4 citations, no model diversity (all Llama family), and `compound-beta-mini` fallback was useless. GPT-5.4 Thinking via ChatGPT Plus ($20/mo) provides genuine architectural diversity vs Gemini. Full evaluation: `~/.claude/projects/C--Users-armen/memory/split-brain-evaluation-2026-03-08.md`.
+
+**Key technical details:**
+- Real Chrome (not Playwright) bypasses Cloudflare Turnstile — Playwright-launched browsers are detected
+- Real Chrome does NOT strip DOM text — direct `innerText` extraction works (Playwright browsers strip it)
+- Each `chatgpt_send()` starts a new chat to avoid stale completion signals
+- Max wait: 120s (Thinking model can take 30-60s for complex prompts)
+
+**Expanded Verification Audit Table (mandatory, 6 rows):**
+After all 6 calls, Claude outputs this table:
+
+```
+| # | Provider | Role | Actual query sent (first 80 chars) | Key finding |
+|---|----------|------|-------------------------------------|-------------|
+| 1 | Gemini | Actuary | "You are a hostile engineering critic..." | [finding] |
+| 2 | Gemini | Blind | "What are the best approaches to..." | [finding] |
+| 3 | Gemini | Auditor | "Verify these claims: (1)..." | [finding] |
+| 4 | ChatGPT | Actuary | "You are a hostile engineering critic..." | [finding] |
+| 5 | ChatGPT | Blind | "What are the best approaches to..." | [finding] |
+| 6 | ChatGPT | Auditor | "Verify these claims: (1)..." | [finding] |
+```
+
+**Cross-provider divergence analysis (mandatory):**
+After the audit table, Claude must explicitly compare:
+1. **Actuary divergences**: Where did Gemini and ChatGPT Actuaries disagree? Gemini Flash vs GPT-5.4 Thinking = genuinely different architectures.
+2. **Blind divergences**: Where did the independent research tracks find different evidence? (Google Search via Gemini vs ChatGPT browsing = different source pools.)
+3. **Auditor divergences**: Claims that one Auditor verified but the other marked UNVERIFIED are the highest-priority items for manual review.
+
+**Execution order:** 3 Gemini calls fire in parallel. 3 ChatGPT calls run sequentially. Gemini results may arrive before ChatGPT finishes — synthesize after all 6 complete.
+
+**Graceful degradation:** If ChatGPT is unavailable (Chrome not running, session expired, Cloudflare block), degrade to Gemini-only 3-call verification. Log which calls failed in the audit table (mark as "FAILED — [reason]"). A 3-call Gemini-only result is still valuable.
+
+**Cost estimate per verification round:** ~$0.01 Gemini (paid tier) + $0 ChatGPT (included in Plus $20/mo). Total: ~$0.01.
 ### Available Gemini MCP Tools
 
 | Tool | Use For |

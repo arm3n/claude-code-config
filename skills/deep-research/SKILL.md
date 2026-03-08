@@ -66,11 +66,17 @@ Before synthesis, scan all extracted text for:
 - Flag unverifiable claims explicitly
 - Note where sources disagree and assess which is more authoritative
 
-### Phase 7: Gemini Verification (split-brain)
-See `/gemini` skill for full protocol. Three separate calls:
-1. **Blind verification** — original claims converted to neutral questions, Gemini researches independently
-2. **Auditor** — atomic SAFE protocol on Claude's synthesis (verbatim quotes or UNVERIFIED)
-3. **Actuary** — lateral critique: "What secondary effects, minority actors, or alternative mechanisms are completely ignored?"
+### Phase 7: Multi-Model Verification (6-call split-brain)
+See `/gemini` skill for full protocol. 3 Gemini parallel + 3 ChatGPT sequential:
+1. **Gemini Actuary FIRST** — adversarial critique via `gemini-search` (locked prompt)
+2. **Gemini Blind** — neutral questions, independent research via `gemini-search`
+3. **Gemini Auditor** — atomic SAFE protocol via `gemini-search`/`gemini-query-cache`
+4. **ChatGPT Actuary** — same adversarial prompt via `chatgpt_send()` (GPT-5.4 Thinking)
+5. **ChatGPT Blind** — same neutral questions via `chatgpt_send()`
+6. **ChatGPT Auditor** — same SAFE protocol via `chatgpt_send()`
+Output 6-row audit table + cross-provider divergence analysis.
+Requires Chrome with `--remote-debugging-port=9222` + agent-browser `--cdp 9222`. Setup: `~/.claude/scripts/chatgpt-setup.md`.
+**Graceful degradation:** If ChatGPT is unavailable, degrade to Gemini-only 3-call. Mark failed calls in the audit table and proceed.
 
 ### Phase 8: Report Generation
 Produce structured report with:

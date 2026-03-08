@@ -21,6 +21,12 @@
 !agents/
 !agents/*.md
 
+# Track scripts
+!scripts/
+!scripts/*.js
+!scripts/*.sh
+!scripts/*.md
+
 # Track statusline
 !statusline-command.js
 
