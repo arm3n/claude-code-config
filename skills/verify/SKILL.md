@@ -9,7 +9,7 @@ description: >
 
 ## Split-Brain Verification Protocol
 
-4+1 tiered verification across up to 3 providers with automatic escalation:
+4+1 tiered verification across up to 3 providers (CDP Pro on explicit request only):
 - **Gemini 3.1 Pro** (MCP, Google Search grounding)
 - **GPT-5.4 @ high** (Codex CLI, Brave/Exa MCP search — $0 on Pro subscription)
 - **GPT-5.4 Pro** (ChatGPT CDP browser automation — escalation/arbiter only)
@@ -41,7 +41,7 @@ Parse the user's request for provider hints:
 Single-provider modes (`/verify gemini`, `/verify gpt`, `/verify pro`) run all 3 roles since there's no cross-family diversity benefit from dropping one.
 
 Examples:
-- `/verify` — 4-call default with auto-escalation
+- `/verify` — 4-call default (no CDP)
 - `/verify all "claim1" "claim2"` — force all 5 calls on specific claims
 - `/verify pro` — Pro-only check via CDP
 - `verify this with just gemini` — Gemini only (natural language trigger)
@@ -59,7 +59,7 @@ Before generating prompts, collect and package the full input context. Every rol
 **Collect all available materials:**
 1. **Original user question/prompt** — the verbatim request that triggered Claude's analysis
 2. **Claude's full analysis** — complete output text, reasoning, confidence levels, cited URLs
-3. **Codebase files** — all source files referenced in or relevant to the analysis
+3. **Codebase files** — all source files referenced in or relevant to the analysis (for Actuary/Auditor — Blind follows Engineering Context Pack rules below)
 4. **Data/specs** — datasets, specifications, reports, API docs, any raw materials Claude worked from
 5. **Atomic claims** — decompose Claude's analysis into individually verifiable statements
 
@@ -68,14 +68,14 @@ Before generating prompts, collect and package the full input context. Every rol
 | Material | Actuary | Blind | Auditor |
 |----------|---------|-------|---------|
 | Original user question | YES | YES | YES |
-| Codebase / source files | YES (attach) | YES (attach) | YES (attach) |
+| Codebase / source files | YES (attach) | SEE CONTEXT PACK | YES (attach) |
 | Data / specs / reports | YES | YES | YES |
 | Claude's full analysis text | YES | NO | YES |
 | Claude's reasoning chain | YES | NO | NO |
 | Claude's confidence levels | YES | NO | NO |
 | Claude's cited web URLs | YES | NO | NO (citation laundering) |
 | Claude's chosen approach | YES | NO | NO |
-| Atomic claims list | optional | NO | YES |
+| Canonical claims list | NO (extracted separately) | NO | YES (mandatory) |
 
 **Blind input sourcing rule:** The Blind's problem context comes from the **original user prompt + raw data/codebase** — never from a redacted version of Claude's output. This is a mechanical cut (copy the original prompt), not a semantic redaction (LLM stripping conclusions from Claude's text). Semantic redaction is non-deterministic, can leak framing, and fails silently.
 
@@ -84,9 +84,45 @@ Before generating prompts, collect and package the full input context. Every rol
 - **Codex**: write relevant files to /tmp and include content in the prompt, or reference file paths if Codex has filesystem access
 - **CDP**: use `--attach file1.txt --attach file2.txt` to upload files to every tab
 
-**Engineering auto-detect:** If Claude's analysis references specific files, functions, or code paths, identify and include those files. For architecture reviews, include the full project structure and key source files, not just the files Claude mentioned.
+**Engineering auto-detect (Actuary and Auditor only):** If Claude's analysis references specific files, functions, or code paths, identify and include those files. For architecture reviews, include the full project structure and key source files, not just the files Claude mentioned. The Blind uses the Engineering Context Pack below instead.
 
-### Step 2: Generate Prompts
+**Engineering Context Pack (Blind role only):**
+
+For engineering verification tasks, the Blind role needs sufficient codebase context to produce meaningful independent analysis. This is a mechanical packing step, not an LLM pass.
+
+**Include:**
+- Files the user explicitly named in their prompt
+- Files appearing in failing test stack traces (workspace-only: exclude `node_modules`, `site-packages`, stdlib, framework internals)
+- Schemas/interfaces imported by the above files (best-effort import-line scan — skip unresolvable paths, non-fatal)
+- Runtime/config files required to interpret the above (e.g., `tsconfig.json`, `.env.example`, `config.yaml`)
+
+**Precedence rule:** User-named files are ALWAYS included, even if Claude also touched them. The "Claude-chosen files" exclusion applies only to files Claude independently selected beyond the user's references.
+
+**NEVER include:**
+- Files Claude independently chose to modify (leaks architectural approach)
+- Files Claude created as part of its implementation
+- Claude's diagnosis, chosen approach, or comparative analysis
+- Claude's cited web URLs
+
+### Step 2: Extract Claims & Generate Prompts
+
+#### Canonical Claim Extraction (mandatory)
+
+Before generating role prompts, decompose Claude's analysis into a canonical numbered claim list. This is done ONCE by Claude — both Auditors evaluate this SAME list (no independent decomposition).
+
+Each claim:
+```
+{claim_id: integer, claim_text: string, severity: LOW|MEDIUM|HIGH}
+```
+
+**Severity discipline:** HIGH only if the claim's failure would flip the recommendation, create a safety/security risk, or invalidate a core premise. Default to LOW unless justified. Inflating severity defeats the adaptive provenance sampler (all claims become mandatory checks) and makes the verdict rubric trigger-happy (any HIGH UNVERIFIED → INSUFFICIENT).
+
+The canonical claim list feeds into:
+- The Auditor prompts (mandatory `[NUMBERED LIST OF ATOMIC CLAIMS]`)
+- The adaptive provenance sampler (severity drives check priority)
+- The verdict rubric (severity drives verdict thresholds)
+
+#### Prompt Generation
 
 **Generate 3 prompt variants using the assembled inputs:**
 
@@ -144,12 +180,27 @@ Example: If Claude concluded "Typst is the best PDF tool because it handles dark
 
 **Prompt C — Auditor (SAFE protocol):**
 
-The Auditor receives the full analysis text alongside atomic claims for context — understanding WHY each claim was made and what reasoning supports it. But the Auditor does NOT receive Claude's cited web URLs and must find evidence independently. This follows the SAFE (Search-Augmented Factuality Evaluator) design: decompose, then search independently.
+The Auditor receives the full analysis text alongside the canonical claim list — understanding WHY each claim was made and what reasoning supports it. But the Auditor does NOT receive Claude's cited web URLs and must find evidence independently. This follows the SAFE (Search-Augmented Factuality Evaluator) design: decompose, then search independently.
 
-> Decompose the following analysis into atomic claims, then verify each. For each claim:
-> - PASS: provide a verbatim quote from a source you found independently, with URL
-> - FAIL: provide evidence contradicting it, with URL
-> - UNVERIFIED: no source found either way
+> Verify each claim in the numbered list below. For each claim, return a structured row with these fields:
+>
+> ```
+> claim_id:       [integer from the list]
+> verdict:        [PASS | FAIL | UNVERIFIED]
+> evidence_kind:  [web | file | logic]
+> evidence_ref:   [URL you found, or workspace file path with line refs, or empty for logic]
+> quote:          [verbatim quote from source, or empty if UNVERIFIED or absence_based]
+> absence_based:  [true | false — true only when proving something does NOT exist]
+> absent_target:  [exact string to search for absence, e.g. "Auth.bypass" — required when absence_based=true AND checking within an existing scope; optional when evidence_ref IS the missing resource]
+> reason:         [one-line explanation]
+> ```
+>
+> Rules:
+> - evidence_kind=web: you found a web source. Provide URL and verbatim quote.
+> - evidence_kind=file: you found evidence in the codebase/workspace. Provide file path with line numbers.
+> - evidence_kind=logic: ONLY for arithmetic errors, internal contradictions, or reasoning derivable from the provided materials. Cannot be used for external factual claims where you simply couldn't find evidence.
+> - For absence-based findings (proving something doesn't exist): set absence_based=true, quote may be empty, but evidence_ref MUST identify where you searched to confirm the absence.
+> - Find your own sources. Do NOT rely on any URLs that may appear in the analysis text.
 >
 > Original question:
 > [ORIGINAL USER PROMPT]
@@ -157,13 +208,23 @@ The Auditor receives the full analysis text alongside atomic claims for context 
 > Full analysis to audit (for context — find your own sources, do not rely on any URLs mentioned here):
 > [CLAUDE'S FULL ANALYSIS TEXT — WITH URLS STRIPPED]
 >
-> Atomic claims to verify:
-> [NUMBERED LIST OF ATOMIC CLAIMS]
+> Canonical claims to verify:
+> [NUMBERED LIST FROM CANONICAL CLAIM EXTRACTION — MANDATORY]
 >
 > Supporting data/codebase:
 > [ALL RELEVANT FILES AND DATA — INLINE OR ATTACHED]
 
-### Step 3: Execute Selected Tracks
+### Step 3: Cache Setup (persistent roles only)
+
+When verifying multiple rounds on the same topic (see Gemini SKILL.md § Persistent Verification Roles):
+1. Use `gemini-count-tokens` on the topic corpus as a sizing heuristic
+2. Attempt `gemini-create-cache` with the corpus. On 503, retry with backoff (up to 3 attempts)
+3. If cache creation fails (503 persistent, or corpus too small), fall back to dynamic context — pass raw materials inline in each query
+4. If cache exists from a prior round, verify it hasn't expired (TTL buffer: re-create if <30 min remaining)
+
+For single-round `/verify` (no persistent roles), skip this step.
+
+### Step 3b: Execute Selected Tracks
 
 Run whichever tracks the user requested (default: Gemini + Codex).
 
@@ -172,9 +233,9 @@ Run whichever tracks the user requested (default: Gemini + Codex).
 **Single-provider modes** (`/verify gemini`, `/verify gpt`, `/verify pro`): Run all 3 roles (Actuary + Blind + Auditor) on the selected provider.
 
 **Gemini track** — skip if `gpt only` or `pro only`:
-Fire as parallel tool calls:
-- Default mode (2 calls): Prompt A (Actuary) + Prompt C (Auditor)
-- Gemini-only mode (3 calls): Prompt A (Actuary) + Prompt B (Blind) + Prompt C (Auditor)
+Fire as **sequential** tool calls. Short simple queries succeed in parallel (tested 2026-03-12), but long multi-claim verification prompts fail on a single MCP npx process (documented in multiple March 2026 handovers — TPM spikes, stdio buffer overflows, timeouts). Use sequential for verification:
+- Default mode (2 calls): Prompt A (Actuary) → then Prompt C (Auditor)
+- Gemini-only mode (3 calls): Prompt A (Actuary) → Prompt B (Blind) → Prompt C (Auditor)
 
 Use `mcp__gemini__gemini-search` for all calls (web-grounded via Google Search). NEVER use `gemini-analyze-text` or `gemini-query` for verification — these are not web-grounded and produce circular verification. If a Gemini context cache exists with relevant source material, use `mcp__gemini__gemini-query-cache` for the Auditor call instead (this is grounded against cached sources, not circular).
 
@@ -198,12 +259,12 @@ PROMPTEOF
 
 # Run in parallel
 codex exec --skip-git-repo-check --full-auto --json --ephemeral \
-  -c model_reasoning_effort=high \
+  -c model_reasoning_effort=xhigh -c service_tier=fast \
   "$(cat /tmp/verify-codex-blind.txt)" > /tmp/verify-codex-blind-result.json 2>&1 &
 PID_B=$!
 
 codex exec --skip-git-repo-check --full-auto --json --ephemeral \
-  -c model_reasoning_effort=high \
+  -c model_reasoning_effort=xhigh -c service_tier=fast \
   "$(cat /tmp/verify-codex-auditor.txt)" > /tmp/verify-codex-auditor-result.json 2>&1 &
 PID_C=$!
 
@@ -226,7 +287,7 @@ print(text)
 " /tmp/verify-codex-actuary-result.json
 ```
 
-**CDP Pro track (3 parallel via browser automation)** — only runs on `/verify pro`, `/verify all`, or auto-escalation:
+**CDP Pro track (3 parallel via browser automation)** — only runs on explicit `/verify pro` or `/verify all`:
 Write prompts to temp files, then run as a background bash task:
 
 ```bash
@@ -252,7 +313,7 @@ node ~/.claude/scripts/chatgpt-cdp.mjs --parallel --json --lock \
 
 **Port selection:** Default is 9223. If lock acquisition fails, retry with `--port 9224`.
 
-**When running multiple tracks:** Launch all tracks concurrently in the same message. Run Gemini MCP calls AND Codex/CDP bash commands in parallel.
+**When running multiple tracks:** Launch the Codex/CDP bash commands concurrently with the first Gemini call. Gemini calls within the track are sequential (long verification prompts fail in parallel on single npx process). The Gemini track and Codex track run concurrently.
 
 ### Step 4: Evidence Provenance (mandatory)
 
@@ -278,14 +339,45 @@ Flag when 2+ providers cite the SAME URL for the SAME claim. Classify each claim
 
 Annotate each claim in the audit table with `[N sources, M independent]`.
 
-**3. Quote Spot-Check**
+**3. Adaptive Evidence Verification**
 
-For claims marked PASS with a verbatim quote, randomly select 1-2 quotes from different providers:
-- Fetch the cited URL via Jina `read_url` (or `mcp__jina__read_url`)
-- Search the page content for the quoted text (fuzzy match — allow minor formatting differences)
-- Mark as `✓ quote verified` or `✗ quote not found in source`
+Targeted evidence audit, not random sampling. Uses the canonical claim list's `severity` field and the source registry's coverage data to prioritize checks. **Provenance outcomes feed back into the verdict state machine** (Step 7, Step 0a.5) — this layer is corrective, not just observational.
 
-This catches hallucinated citations and content that changed after the verifier's cached search. Do NOT spot-check every quote — 1-2 samples per run is sufficient.
+**Mandatory checks** (always run, exempt from cap):
+- All **lone-source claims** — only one verifier cited evidence (highest hallucination risk)
+- All **severity=HIGH claims** — load-bearing claims that drive the verdict
+
+**Random sample**: 20% of remaining (non-mandatory) claims
+
+**Expansion on failure**: on the first `not_found` or `invalid_resource` result, expand by an additional 30% of non-mandatory claims, hard-capped at 50% total non-mandatory claims checked
+
+**Provenance outcomes apply only to claims actually checked** by the adaptive sampler (mandatory + random + expansion). Claims not selected pass through to the verdict with Auditor verdicts unchanged.
+
+**Verification by evidence kind:**
+
+`evidence_kind=web` + `absence_based=false` (standard web check):
+- Fetch cited URL via Jina `read_url`
+- Search page content for quoted text (fuzzy match — whitespace normalization, curly/straight quote equivalence)
+
+`evidence_kind=web` + `absence_based=true`:
+- **Auto-downgrade to UNVERIFIED** in Step 0a.5 (Jina strips DOM elements, making web absence checks systematically unreliable). No fetch attempted.
+
+`evidence_kind=file` + `absence_based=false` (standard file check):
+- Open workspace file at `evidence_ref`. **Workspace-only guard**: canonicalize path, reject anything outside project root.
+- Verify quoted text exists at referenced lines (fuzzy match)
+
+`evidence_kind=file` + `absence_based=true` (absence check):
+- If `evidence_ref` IS the missing resource (e.g., claim "file doesn't exist"): check if file exists. File Not Found = `verified`.
+- If checking within an existing scope: open file, search for `absent_target` string, verify it's NOT present. Found = `not_found` (absence disproven).
+
+`evidence_kind=logic`:
+- **Exempt from provenance** (all cases). Self-evident reasoning needs no external citation.
+
+**Four provenance outcomes** (consistent semantics — `not_found` always means "Auditor's evidence didn't check out"):
+- `✓ verified` — evidence confirmed (quote found, or absence confirmed)
+- `✗ not_found` — source reachable but evidence failed (quote absent, or absence disproven by target being present). Triggers expansion.
+- `✗ invalid_resource` — 404, NXDOMAIN, DNS failure (source fabricated). Triggers expansion.
+- `⊘ unreachable` — 401, 403, CAPTCHA, timeout (source may be valid behind access control). Neutral — does NOT trigger expansion, annotate in registry.
 
 **4. Injection Screening**
 
@@ -329,6 +421,14 @@ After all calls complete, output this mandatory table:
 
 For single-provider modes (`/verify gemini`, `/verify gpt`, `/verify pro`), show 3 rows with all roles (Actuary/Blind/Auditor).
 
+**Provider Calibration (human-facing annotations only):**
+
+Known provider-specific patterns — annotate in the audit table for the human reader:
+- **Gemini Actuary**: tends toward false positives on engineering tasks (flags "over-engineering" on lean designs)
+- **Codex Auditor**: sometimes marks UNVERIFIED when evidence exists behind paywalls
+
+These are **annotations visible to the human**, never fed into Claude's synthesis prompt. They cannot soften or override the deterministic verdict. If the rubric says FAIL, calibration notes cannot change that — they only help the human contextualize individual rows.
+
 ### Step 6: Cross-Provider Divergence Analysis
 
 **Only when running 2+ tracks.** Skip for single-provider runs.
@@ -342,11 +442,67 @@ After the table, explicitly compare:
 
 ### Step 7: Verdict
 
-Synthesize across all calls:
-- **High confidence**: All providers agree, Auditors PASS on core claims, Actuaries found no structural blindness
-- **Medium confidence**: Minor divergences, some UNVERIFIED claims, Actuaries found peripheral gaps
-- **Low confidence**: Major divergences between providers, FAIL/UNVERIFIED on core claims, Actuaries identified structural blindness
-- **CDP Pro included** (via `/verify all` or `/verify pro`): Note CDP Pro's findings and how they compare
+#### Claim-Level Merge
+
+Two Auditors produce two structured verdict rows per `claim_id`. Merge into a single canonical verdict per claim before evaluating the document-level rubric.
+
+**Step 0a — Downgrade unsupported verdicts (per-Auditor, BEFORE merge):**
+
+For `evidence_kind=web|file`:
+- FAIL → UNVERIFIED if `evidence_ref` empty, OR if `quote` empty AND `absence_based=false`
+- PASS → UNVERIFIED if `evidence_ref` empty, OR if `quote` empty AND `absence_based=false`
+
+`evidence_kind=logic` is exempt from both rules (self-evident, no external citation needed).
+`absence_based=true` with populated `evidence_ref` survives with empty `quote` — both PASS and FAIL.
+
+**Step 0a.5 — Provenance feedback (per-Auditor, BEFORE merge):**
+
+For each claim checked by the adaptive evidence verification layer (Step 4), apply the provenance result:
+- `not_found` or `invalid_resource` → downgrade verdict to UNVERIFIED (both PASS and FAIL — unverifiable evidence cannot be trusted regardless of direction)
+- `verified` → no change
+- `unreachable` → no change (annotated for human review in the source registry)
+- `evidence_kind=web` + `absence_based=true` → downgrade to UNVERIFIED (web absence unverifiable via Jina)
+- Claims not checked by provenance (random sample miss, `evidence_kind=logic`) → no change
+
+Principle: if you can't verify the evidence, you can't trust the verdict.
+
+**Step 0b — Merge per claim_id (FAIL > UNVERIFIED > PASS):**
+
+| Auditor A | Auditor B | Merged |
+|-----------|-----------|--------|
+| FAIL | anything | FAIL |
+| PASS | UNVERIFIED | UNVERIFIED |
+| UNVERIFIED | UNVERIFIED | UNVERIFIED |
+| PASS | PASS | PASS |
+
+FAIL is strongest signal. UNVERIFIED dominates PASS (absence of confirmation ≠ confirmation).
+
+#### Evidentiary Verdict (deterministic rubric)
+
+Evaluate merged verdicts against the canonical claim list. **Evaluation order: first match wins.**
+
+```
+ESCALATE:         0 claims extracted, schema violations, missing claim_ids,
+                  JSON parse errors
+FAIL:             ≥1 merged FAIL on severity=HIGH claim,
+                  OR ≥3 merged FAILs AND >30% total FAILs (regardless of severity)
+INSUFFICIENT:     ≥1 merged UNVERIFIED on severity=HIGH claim,
+                  OR ≥3 UNVERIFIED AND >30% total UNVERIFIED
+PASS_WITH_CAVEATS: does not meet FAIL or INSUFFICIENT,
+                  but has ≥1 non-PASS merged verdict
+PASS:             100% of merged verdicts = PASS
+```
+
+**Hard narrative guardrail:** If the rubric yields FAIL or INSUFFICIENT, the prose summary must state that verdict and may explain why, but CANNOT recommend proceeding, say "likely fine," or soften the verdict in any way.
+
+#### Structural Concerns
+
+The evidentiary verdict measures atomic claim accuracy. A separate **Structural Concerns** section captures holistic findings from the Actuary (hostile critique) and Blind (independent research divergence) that don't decompose into individual claims.
+
+- Structural Concerns can NEVER override or soften FAIL, INSUFFICIENT, or ESCALATE
+- Structural Concerns sit alongside PASS and PASS_WITH_CAVEATS as mandatory additional context
+- Format: `Evidentiary Verdict: [verdict]. Structural Concerns: [Actuary/Blind findings or "None"].`
+- If the Actuary identified a structural gap AND the Blind independently diverged on the same topic, flag this prominently — it's the highest-signal finding even if all atomic claims passed
 
 ### Graceful Degradation
 
@@ -361,7 +517,7 @@ Synthesize across all calls:
 - **Auditor relabeling**: Running 3 convergent queries and calling them Actuary/Blind/Auditor. The Actuary MUST be adversarial. Check the audit table — if all 3 queries are "is X correct?", none is an Actuary.
 - **Cognitive overload**: Asking one call to do both fact-checking AND critique. Always split divergent (Actuary) from convergent (Auditor).
 - **Same-family bias**: Codex (GPT-5.4) and CDP Pro (GPT-5.4 Pro) are the same model family. Cross-family diversity comes from Gemini vs GPT, not Codex vs CDP Pro. When both GPT tracks agree but Gemini disagrees, weight the disagreement heavily.
-- **xhigh on Codex**: Default to `high` reasoning effort for Codex verification calls. `xhigh` is viable for complex multi-step analysis but slower and more expensive on straightforward fact-checks. Reserve `xhigh` for cases where the verification itself is unusually complex.
+- **Reasoning effort on Codex**: Default to `xhigh` reasoning effort with `service_tier=fast` (1.5x speed, 2x usage) for Codex verification calls. Maximum reasoning depth ensures verification quality. The `service_tier=fast` flag compensates for `xhigh` slowness.
 - **CDP on critical path**: Never make CDP a required step in the default flow. It breaks ~10-15% of the time. Always treat CDP failure as abstain.
 - **Citation laundering**: Multiple verifiers citing the same blog/article that itself cites a single primary source. Looks like 3 independent confirmations but is actually 1. The evidence provenance layer (Step 4) catches this via source overlap detection — but also watch for syndicated content (same text on different domains).
 - **Pre-supplied URL feeding**: Giving the Auditor Claude's cited web URLs. The Auditor anchors to those sources instead of searching independently, enabling the exact citation laundering you're trying to detect. SAFE's design searches independently by design. Give the Auditor the full analysis text for context but strip all URLs — it must find evidence on its own.

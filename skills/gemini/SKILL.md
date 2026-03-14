@@ -54,9 +54,9 @@ Core principle: **Gemini reads, Claude writes.** Use Gemini's 1M context for ing
 
 ### Gemini Verification Protocol (split-brain, three calls)
 
-When asked to "verify with Gemini," run THREE separate calls. **Actuary runs FIRST** — before Blind and Auditor. Never combine convergent fact-checking with divergent critique — mixing them causes attention collapse where Gemini hyper-fixates on quotes and defaults to "looks good" on gaps.
+When asked to "verify with Gemini," run THREE separate calls. **Actuary is listed first in the audit table** (conceptually prior — challenges the premise). In practice, calls execute sequentially for verification workloads (see Persistent Verification Roles below). Never combine convergent fact-checking with divergent critique — mixing them causes attention collapse where Gemini hyper-fixates on quotes and defaults to "looks good" on gaps.
 
-**Call 1 — The Actuary FIRST (divergent critique)**: Runs BEFORE other calls to challenge the premise before details get validated. Separate `gemini-search` call that sees Claude's synthesis. Purely divergent. Uses the locked adversarial prompt below (research OR engineering variant — pick whichever fits):
+**Call 1 — The Actuary (divergent critique)**: Listed first in audit table. Separate `gemini-search` call that sees Claude's synthesis. Purely divergent. Uses the locked adversarial prompt below (research OR engineering variant — pick whichever fits):
 
 *Research variant:*
 > "You are a hostile, lateral-thinking analyst. What secondary effects (economic, logistical, insurance, supply chain), minority actors (non-state groups, proxies, local factions), or alternative mechanisms are completely ignored by this analysis? What is the most obvious way this analysis is structurally blind?"
@@ -68,14 +68,17 @@ This call must NOT also fact-check — its only job is to find what's wrong or m
 
 **Call 2 — Independent verification (blind)**: Convert original claims into neutral questions (strip Claude's framing). Give to Gemini via `gemini-search`. Let it independently research and return findings with citations. Compare against Claude's conclusions. Divergences become high-priority flags.
 
-**Call 3 — The Auditor (SAFE protocol)**: Give Gemini Claude's synthesis. Purely convergent:
-- Decompose into atomic claims and verify each against sources
+**Blind input hygiene (engineering tasks):** Include files the user explicitly named, files from failing test stack traces (workspace-only), and imported schemas/interfaces. User-named files always included even if Claude also touched them. NEVER include files Claude independently chose to modify, Claude's diagnosis/approach/URLs, or files Claude created. See `/verify` SKILL.md § Engineering Context Pack for full rules.
+
+**Call 3 — The Auditor (SAFE protocol)**: Give Gemini Claude's synthesis + the canonical claim list. Purely convergent:
+- Verify each claim from the canonical list (no independent decomposition)
+- Return structured output per claim: `{claim_id, verdict, evidence_kind, evidence_ref, quote, absence_based, reason}` — see `/verify` SKILL.md § Auditor prompt for full schema
 - For every claim validated, provide a verbatim quote from a source — if no quote exists, mark UNVERIFIED
 - Output: structured PASS/FAIL/UNVERIFIED per claim. Nothing else.
 - **Tool selection**: If a Gemini context cache exists with the extracted source corpus, use `gemini-query-cache` to verify claims against *our actual sources* (not just the live web). If no cache exists, fall back to `gemini-search`.
 
-**After Gemini calls — proceed to ChatGPT sequential track (see below).**
-If running Gemini-only (no ChatGPT), output a 3-row audit table. If running full 6-call verification, output the expanded 6-row table defined in the ChatGPT section below.
+**After Gemini calls:** For multi-provider verification (Gemini + Codex + CDP Pro), see `/verify` SKILL.md.
+If running Gemini-only, output a 3-row audit table. If running full 4+1 verification, output the audit table defined in `/verify` SKILL.md § Step 5.
 
 All three Gemini calls use `gemini-search` — it runs on **Gemini 3.1 Pro** (via `GEMINI_PRO_MODEL` env var) with Google Search grounding. Verified via API `modelVersion` field 2026-03-08.
 
@@ -94,72 +97,39 @@ All three Gemini calls use `gemini-search` — it runs on **Gemini 3.1 Pro** (vi
 
 **Anti-pattern — Auditor relabeling (ADK incident 2026-03-07):** Running 3 convergent feasibility checks and labeling them Blind+Auditor+Actuary. The Actuary-first ordering + mandatory audit table prevents this. If the audit table shows 3 queries that all ask "can X do Y?" — none of them was an Actuary.
 
-### ChatGPT Sequential Verification Track (split-brain, three calls)
+### Multi-Provider Verification (canonical spec)
 
-Run the ChatGPT track after launching the 3 Gemini calls. ChatGPT uses **GPT-5.4 Thinking** — a fundamentally different architecture from Gemini, maximizing provider diversity. The 3 ChatGPT calls run SEQUENTIALLY (one browser tab, one at a time).
+The full multi-provider verification protocol (Gemini + Codex + CDP Pro) is defined in `/verify` SKILL.md. This Gemini skill covers the Gemini-specific calls only. For cross-provider execution, audit tables, evidence provenance, and divergence analysis, see the `/verify` skill.
 
-**Setup:** Requires Chrome launched with `--remote-debugging-port=9222 --user-data-dir=<temp-dir>`, logged into ChatGPT, with agent-browser connected via `--session chatgpt --cdp 9222`. Full procedure in `~/.claude/scripts/chatgpt-setup.md`. Function code in `~/.claude/scripts/chatgpt-send.js`.
+### Persistent Verification Roles (multi-round topics)
 
-**Injection (once per session):**
-```bash
-agent-browser --session chatgpt eval --stdin < ~/.claude/scripts/chatgpt-send.js
-```
+When verifying iterations of the same evolving analysis across multiple `/verify` rounds, roles can persist state to improve continuity. Verified via 6-round 3-way review (Claude + Codex + Gemini, 2026-03-12).
 
-**Call 4 — ChatGPT Actuary (divergent critique):** Same adversarial prompt as Gemini Actuary (research or engineering variant). GPT-5.4 Thinking running the *same adversarial frame* as Gemini — divergences between the two Actuaries are the highest-signal findings.
+**Verified Rules:**
 
-**Call 5 — ChatGPT Blind (independent research):** Same neutral questions as Gemini Blind (strip Claude's framing). GPT-5.4 Thinking researches independently, providing a different perspective.
+1. **Gemini calls: sequential by default.** Short queries succeeded in parallel (re-tested 2026-03-12), but multiple prior workloads with long multi-claim verification prompts failed (March 4-5, 2026 handovers). Long prompts cause TPM spikes, stdio buffer overflows, and timeouts in the single npx process. Use sequential for verification; parallel only for simple independent lookups.
+2. **Codex calls: parallel** (separate OS processes). Both tracks launch concurrently.
+3. **Blind: always fresh via `gemini-search` only.** Raw materials (original prompt, source docs, codebase) passed dynamically in the query — NOT via shared cache. The MCP has no tool that combines cached content with web search grounding in one call (`gemini-query-cache` and `gemini-search` are separate paths). The underlying Gemini API supports this combination, but the MCP wrapper does not expose it yet.
+4. **Actuary/Auditor: persist** via short per-role state summary files on disk. Format:
+   ```
+   Round: N | Date: YYYY-MM-DD
+   Open issues: [brief list]
+   Resolved since last round: [brief list]
+   New evidence since last round: [brief list]
+   ```
+   Never full transcripts — prevents anchoring and query bloat.
+5. **1 shared neutral corpus cache.** Raw materials only. Role persona injected in query preamble per call.
+6. **Cache creation:** Use `gemini-count-tokens` as sizing heuristic. Attempt creation; handle failure gracefully by falling back to dynamic context. Do not hardcode minimum token thresholds.
+7. **Daily cache re-creation** (MCP TTL capped at 1440 min, no patch/update tool exposed).
 
-**Call 6 — ChatGPT Auditor (SAFE protocol):** Same atomic claims as Gemini Auditor. Verify each claim with evidence or mark UNVERIFIED. Different model + different reasoning = independent fact-check.
+**Defaults (tuning parameters, adjustable):**
 
-**Execution pattern (each call):**
-```bash
-agent-browser --session chatgpt eval --stdin <<'EVALEOF'
-(async () => {
-  const result = await window.chatgpt_send("YOUR PROMPT HERE", 120000);
-  return result;
-})()
-EVALEOF
-```
+8. Shared cache should have no `systemInstruction` (neutral) — design choice since roles share corpus.
+9. Auditor recommended to split into 2 sequential sub-calls: (a) corpus audit via `gemini-query-cache`, (b) web audit via `gemini-search`. Prevents attention dilution from mixing cached + live sources.
+10. Rolling window: max 5 open issues in state summaries to prevent unbounded growth.
+11. TTL buffer: if cache expires within 30 min, re-create proactively before launching tracks.
+12. Implicit caching not relied upon — not verified in our AI Studio setup.
 
-| Call | Role | Model | Method | Mode |
-|------|------|-------|--------|------|
-| 4: ChatGPT Actuary | Adversarial critique | GPT-5.4 Thinking | `chatgpt_send()` | Divergent |
-| 5: ChatGPT Blind | Independent research | GPT-5.4 Thinking | `chatgpt_send()` | Divergent |
-| 6: ChatGPT Auditor | Atomic SAFE | GPT-5.4 Thinking | `chatgpt_send()` | Convergent |
-
-**Why ChatGPT replaced Groq (2026-03-08):** Groq scored 2.8/10 in live testing — 0/3 first-attempt success (413, 429 errors), fabricated 4 citations, no model diversity (all Llama family), and `compound-beta-mini` fallback was useless. GPT-5.4 Thinking via ChatGPT Plus ($20/mo) provides genuine architectural diversity vs Gemini. Full evaluation: `~/.claude/projects/C--Users-armen/memory/split-brain-evaluation-2026-03-08.md`.
-
-**Key technical details:**
-- Real Chrome (not Playwright) bypasses Cloudflare Turnstile — Playwright-launched browsers are detected
-- Real Chrome does NOT strip DOM text — direct `innerText` extraction works (Playwright browsers strip it)
-- Each `chatgpt_send()` starts a new chat to avoid stale completion signals
-- Max wait: 120s (Thinking model can take 30-60s for complex prompts)
-
-**Expanded Verification Audit Table (mandatory, 6 rows):**
-After all 6 calls, Claude outputs this table:
-
-```
-| # | Provider | Role | Actual query sent (first 80 chars) | Key finding |
-|---|----------|------|-------------------------------------|-------------|
-| 1 | Gemini | Actuary | "You are a hostile engineering critic..." | [finding] |
-| 2 | Gemini | Blind | "What are the best approaches to..." | [finding] |
-| 3 | Gemini | Auditor | "Verify these claims: (1)..." | [finding] |
-| 4 | ChatGPT | Actuary | "You are a hostile engineering critic..." | [finding] |
-| 5 | ChatGPT | Blind | "What are the best approaches to..." | [finding] |
-| 6 | ChatGPT | Auditor | "Verify these claims: (1)..." | [finding] |
-```
-
-**Cross-provider divergence analysis (mandatory):**
-After the audit table, Claude must explicitly compare:
-1. **Actuary divergences**: Where did Gemini and ChatGPT Actuaries disagree? Gemini Flash vs GPT-5.4 Thinking = genuinely different architectures.
-2. **Blind divergences**: Where did the independent research tracks find different evidence? (Google Search via Gemini vs ChatGPT browsing = different source pools.)
-3. **Auditor divergences**: Claims that one Auditor verified but the other marked UNVERIFIED are the highest-priority items for manual review.
-
-**Execution order:** 3 Gemini calls fire in parallel. 3 ChatGPT calls run sequentially. Gemini results may arrive before ChatGPT finishes — synthesize after all 6 complete.
-
-**Graceful degradation:** If ChatGPT is unavailable (Chrome not running, session expired, Cloudflare block), degrade to Gemini-only 3-call verification. Log which calls failed in the audit table (mark as "FAILED — [reason]"). A 3-call Gemini-only result is still valuable.
-
-**Cost estimate per verification round:** ~$0.01 Gemini (paid tier) + $0 ChatGPT (included in Plus $20/mo). Total: ~$0.01.
 ### Available Gemini MCP Tools
 
 | Tool | Use For |
